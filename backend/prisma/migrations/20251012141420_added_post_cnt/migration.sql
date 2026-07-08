@@ -1,2 +1,0 @@
--- AlterTable
-ALTER TABLE `user` ADD COLUMN `post_cnt` INTEGER NOT NULL DEFAULT 0;
