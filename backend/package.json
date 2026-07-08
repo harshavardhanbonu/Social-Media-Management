@@ -6,8 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon server.js",
-    "seed": "node prisma/seed.js"
+    "dev": "nodemon server.js"
   },
   "keywords": [],
   "author": "",
@@ -22,9 +21,5 @@
     "multer": "^2.0.2",
     "mysql2": "^3.15.3",
     "nodemon": "^3.1.10"
-  },
-  "devDependencies": {
-    "@prisma/client": "^6.18.0",
-    "prisma": "^6.16.3"
   }
 }
