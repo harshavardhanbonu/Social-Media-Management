@@ -1,16 +1,44 @@
 import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import dotenv from "dotenv";
 import { createId } from "@paralleldrive/cuid2";
 import { authRequired } from "../middleware/auth.js";
 import pool from "../../database/db.js";
-
-dotenv.config();
+import { JWT_SECRET } from "../config/jwt.js";
 
 const router = express.Router();
 
-const JWT_SECRET = process.env.JWT_SECRET || "login_signup"; // use env in prod
+// --- Helper Functions ---
+const findUserByEmail = async (email) => {
+  const [rows] = await pool.execute(
+    `SELECT 
+      user_id AS id, 
+      user_name AS username, 
+      name, 
+      email, 
+      password_hashed AS passwordHashed 
+    FROM user 
+    WHERE email = ? LIMIT 1`,
+    [email]
+  );
+  return rows.length > 0 ? rows[0] : null;
+};
+
+const findUserByUsername = async (username) => {
+  const [rows] = await pool.execute(
+    `SELECT 
+      user_id AS id, 
+      user_name AS username, 
+      name, 
+      email, 
+      password_hashed AS passwordHashed 
+    FROM user 
+    WHERE user_name = ? LIMIT 1`,
+    [username]
+  );
+  return rows.length > 0 ? rows[0] : null;
+};
+// ------------------------
 
 // Signup route
 router.post("/signup", async (req, res) => {
@@ -21,22 +49,15 @@ router.post("/signup", async (req, res) => {
       return res.status(400).json({ message: "All fields are required" });
     }
 
-    // Check if email exists
-    const [existingEmailRows] = await pool.query(
-      "SELECT user_id FROM user WHERE email = ?",
-      [email]
-    );
-    if (existingEmailRows.length > 0) {
-      return res.status(400).json({ message: "Email already exists" });
+    // Check for existing users to prevent duplicates
+    const existingEmail = await findUserByEmail(email);
+    if (existingEmail) {
+      return res.status(409).json({ message: "Email already exists" });
     }
 
-    // Check if username exists
-    const [existingUsernameRows] = await pool.query(
-      "SELECT user_id FROM user WHERE user_name = ?",
-      [username]
-    );
-    if (existingUsernameRows.length > 0) {
-      return res.status(400).json({ message: "Username already exists" });
+    const existingUsername = await findUserByUsername(username);
+    if (existingUsername) {
+      return res.status(409).json({ message: "Username already exists" });
     }
 
     const hashedpassword = await bcrypt.hash(password, 10);
@@ -68,7 +89,7 @@ router.post("/signup", async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("signup error:", err);
+    console.error("[Auth - Signup] Error:", err);
     res.status(500).json({ message: "Server error during signup" });
   }
 });
@@ -84,52 +105,23 @@ router.post("/login", async (req, res) => {
         .json({ message: "Email or username and password are required" });
     }
 
-    let user = null;
-    
-    // Find by email
-    if (email) {
-      const [rows] = await pool.query(
-        `SELECT 
-          user_id AS id, 
-          user_name AS username, 
-          name, 
-          email, 
-          password_hashed AS passwordHashed 
-        FROM user 
-        WHERE email = ?`,
-        [email]
-      );
-      if (rows.length > 0) user = rows[0];
-    }
-    
-    // Find by username if not found by email
-    if (!user && username) {
-      const [rows] = await pool.query(
-        `SELECT 
-          user_id AS id, 
-          user_name AS username, 
-          name, 
-          email, 
-          password_hashed AS passwordHashed 
-        FROM user 
-        WHERE user_name = ?`,
-        [username]
-      );
-      if (rows.length > 0) user = rows[0];
-    }
+    // Find by email or username based on provided input
+    const user = email 
+      ? await findUserByEmail(email) 
+      : await findUserByUsername(username);
 
     if (!user) {
-      return res.status(400).json({ message: "User not found" });
+      return res.status(401).json({ message: "User not found" });
     }
 
     const isMatch = await bcrypt.compare(password, user.passwordHashed);
     if (!isMatch) {
-      return res.status(400).json({ message: "Invalid password" });
+      return res.status(401).json({ message: "Invalid password" });
     }
 
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "1d" });
 
-    res.json({
+    res.status(200).json({
       message: "Login successful",
       token,
       user: {
@@ -140,7 +132,7 @@ router.post("/login", async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("login error:", err);
+    console.error("[Auth - Login] Error:", err);
     res.status(500).json({ message: "Server error during login" });
   }
 });
@@ -148,7 +140,7 @@ router.post("/login", async (req, res) => {
 // Get current user
 router.get("/me", authRequired, async (req, res) => {
   try {
-    const [rows] = await pool.query(
+    const [rows] = await pool.execute(
       `SELECT 
         user_id AS id, 
         user_name AS username, 
@@ -161,19 +153,19 @@ router.get("/me", authRequired, async (req, res) => {
         avatar_url AS avatarUrl, 
         email 
       FROM user 
-      WHERE user_id = ?`,
-      [req.user.id] // Assumes your auth middleware attaches user.id
+      WHERE user_id = ? LIMIT 1`,
+      [req.user.id] // Supplied securely via auth middleware
     );
 
-    const u = rows.length > 0 ? rows[0] : null;
+    const user = rows.length > 0 ? rows[0] : null;
 
-    if (!u) {
+    if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    res.json(u);
+    res.status(200).json(user);
   } catch (err) {
-    console.error("/auth/me error:", err);
+    console.error("[Auth - Get Me] Error:", err);
     res.status(500).json({ message: "Failed to load user" });
   }
 });
